@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { User, Lock, ArrowRight, ShieldCheck } from 'lucide-react';
+import { Lock, ArrowRight, ShieldCheck } from 'lucide-react';
 import { Button } from './Button';
 
 interface LockScreenProps {
@@ -7,24 +7,23 @@ interface LockScreenProps {
 }
 
 export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
-  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!username || !password) return;
+    if (!password) return;
 
     setIsLoading(true);
     setError('');
 
     // Fake loading delay for realism
     setTimeout(() => {
-      if (username === 'Trần Thị Kim Thoa' && password === '12345') {
+      if (password === 'SKKN100' || password === 'SKKN111') {
         onUnlock();
       } else {
-        setError('Tên đăng nhập hoặc mật khẩu không đúng. Vui lòng thử lại.');
+        setError('Mật khẩu không đúng. Vui lòng thử lại.');
         setIsLoading(false);
       }
     }, 800);
@@ -35,69 +34,46 @@ export const LockScreen: React.FC<LockScreenProps> = ({ onUnlock }) => {
       <div className="w-full max-w-md bg-white rounded-2xl shadow-2xl border border-sky-100 overflow-hidden animate-fadeIn">
         <div className="bg-sky-600 p-8 text-center">
           <div className="w-16 h-16 bg-white/20 backdrop-blur-sm rounded-full flex items-center justify-center mx-auto mb-4">
-            <User className="w-8 h-8 text-white" />
+            <Lock className="w-8 h-8 text-white" />
           </div>
           <h1 className="text-2xl font-bold text-white">SKKN PRO</h1>
-          <p className="text-sky-100 text-sm mt-1">Đăng nhập hệ thống</p>
+          <p className="text-sky-100 text-sm mt-1">Hệ thống bảo mật nội bộ</p>
         </div>
 
         <div className="p-8">
-          <form onSubmit={handleSubmit} className="space-y-5">
+          <form onSubmit={handleSubmit} className="space-y-6">
             <div className="space-y-2">
               <label className="block text-sm font-medium text-gray-700">
-                Tên đăng nhập
+                Nhập mật khẩu truy cập
               </label>
               <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <User className="h-5 w-5 text-gray-400" />
-                </div>
-                <input
-                  type="text"
-                  value={username}
-                  onChange={(e) => setUsername(e.target.value)}
-                  className="block w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition-colors"
-                  placeholder="Nhập tên đăng nhập"
-                  autoFocus
-                />
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="block text-sm font-medium text-gray-700">
-                Mật khẩu
-              </label>
-              <div className="relative">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-400" />
-                </div>
                 <input
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="block w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition-colors"
+                  className="block w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-sky-500 focus:border-sky-500 transition-colors text-lg tracking-widest"
                   placeholder="••••••••"
+                  autoFocus
                 />
               </div>
-            </div>
-
-            {error && (
-              <p className="text-sm text-red-500 font-medium animate-pulse">
-                {error}
+              {error && (
+                <p className="text-sm text-red-500 font-medium animate-pulse">
+                  {error}
+                </p>
+              )}
+              <p className="text-xs text-gray-400 flex items-center gap-1">
+                <ShieldCheck size={12} />
+                Kết nối an toàn được mã hóa
               </p>
-            )}
-
-            <p className="text-xs text-gray-400 flex items-center gap-1">
-              <ShieldCheck size={12} />
-              Kết nối an toàn được mã hóa
-            </p>
+            </div>
 
             <Button
               type="submit"
               className="w-full py-3 text-lg shadow-sky-500/30"
               isLoading={isLoading}
-              disabled={!username || !password}
+              disabled={!password}
             >
-              {isLoading ? 'Đang xác thực...' : 'Đăng nhập'}
+              {isLoading ? 'Đang xác thực...' : 'Mở khóa ứng dụng'}
             </Button>
           </form>
         </div>

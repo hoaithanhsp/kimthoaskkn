@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { UserInfo, GenerationStep, GenerationState } from './types';
+import { UserInfo, GenerationStep, GenerationState, SKKNTemplate } from './types';
 import { STEPS_INFO, SOLUTION_MODE_PROMPT, FALLBACK_MODELS } from './constants';
 import { initializeGeminiChat, sendMessageStream, getFriendlyErrorMessage } from './services/geminiService';
 import { SKKNForm } from './components/SKKNForm';
@@ -69,7 +69,9 @@ const App: React.FC = () => {
     focus: '',
     referenceDocuments: '',
     skknTemplate: '',
-    specialRequirements: ''
+    specialRequirements: '',
+    includeSolution4_5: false, // Mặc định chỉ viết 3 giải pháp
+    customTemplate: undefined // Cấu trúc mẫu SKKN tùy chỉnh (đã trích xuất)
   });
 
   const [state, setState] = useState<GenerationState>({
@@ -85,6 +87,88 @@ const App: React.FC = () => {
   // Phụ lục riêng biệt
   const [appendixDocument, setAppendixDocument] = useState('');
   const [isAppendixLoading, setIsAppendixLoading] = useState(false);
+
+  // Helper function để tạo prompt nhắc lại giới hạn trang
+  const getPageLimitPrompt = useCallback(() => {
+    if (!userInfo.specialRequirements) return '';
+
+    // Parse số trang từ yêu cầu (ví dụ: "giới hạn 25-30 trang" → 25-30)
+    const pageLimitMatch = userInfo.specialRequirements.match(/giới hạn.*?(\d+)[-–]?(\d+)?\s*trang/i);
+
+    if (pageLimitMatch) {
+      const minPages = parseInt(pageLimitMatch[1]);
+      const maxPages = pageLimitMatch[2] ? parseInt(pageLimitMatch[2]) : minPages;
+
+      return `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ GIỚI HẠN SỐ TRANG (BẮT BUỘC TUÂN THỦ NGHIÊM NGẶT):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+TỔNG NỘI DUNG CHÍNH: ${minPages}-${maxPages} trang (KHÔNG tính Dàn ý và Phụ lục)
+
+PHÂN BỔ CHO MỖI PHẦN:
+- Phần I & II: TỐI ĐA 4 trang (viết ngắn gọn, súc tích)
+- Phần III: TỐI ĐA 3 trang
+- Phần IV (Giải pháp): ${Math.round(minPages * 0.55)}-${Math.round(maxPages * 0.65)} trang (chia đều cho 3 giải pháp)
+- Phần V, VI & Kết luận: ${Math.round(minPages * 0.15)}-${Math.round(maxPages * 0.2)} trang
+
+🚨 CẢNH BÁO: VIẾT NGẮN GỌN, SÚC TÍCH! 
+- Mỗi ý chính không quá 2-3 câu
+- Tránh lặp lại ý
+- Ưu tiên bảng biểu thay vì đoạn văn dài
+- KHÔNG viết dài hơn số trang quy định!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+    }
+
+    // Nếu có yêu cầu khác (không phải giới hạn trang cụ thể)
+    return `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ YÊU CẦU ĐẶC BIỆT TỪ NGƯỜI DÙNG (NHẮC LẠI - BẮT BUỘC TUÂN THỦ):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${userInfo.specialRequirements}
+
+Hãy áp dụng CHÍNH XÁC các yêu cầu trên vào phần đang viết!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+`;
+  }, [userInfo.specialRequirements]);
+
+  // Helper function để tạo prompt cấu trúc từ mẫu SKKN đã trích xuất
+  const getCustomTemplatePrompt = useCallback(() => {
+    if (!userInfo.customTemplate) return null;
+
+    try {
+      const template: SKKNTemplate = JSON.parse(userInfo.customTemplate);
+      if (!template.sections || template.sections.length === 0) return null;
+
+      // Tạo chuỗi hiển thị cấu trúc
+      const structureText = template.sections.map(s => {
+        const indent = '  '.repeat(s.level - 1);
+        const prefix = s.level === 1 ? '📌' : s.level === 2 ? '•' : '○';
+        return `${indent}${prefix} ${s.id}. ${s.title}`;
+      }).join('\n');
+
+      return `
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 CẤU TRÚC MẪU SKKN ĐÃ TRÍCH XUẤT (BẮT BUỘC TUÂN THỦ):
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚠️ QUAN TRỌNG: Mẫu SKKN từ ${template.name || 'Sở/Phòng GD'} có CẤU TRÚC như sau.
+BẠN BẮT BUỘC PHẢI TẠO DÀN Ý VÀ NỘI DUNG THEO ĐÚNG CẤU TRÚC NÀY:
+
+${structureText}
+
+QUY TẮC BẮT BUỘC:
+1. TẠO DÀN Ý theo ĐÚNG thứ tự và tên các phần/mục như trên
+2. KHÔNG thay đổi tên các phần lớn (level 1)
+3. CÁC MỤC CON có thể điều chỉnh nội dung cho phù hợp đề tài nhưng PHẢI giữ nguyên cấu trúc
+4. Điền nội dung phù hợp với đề tài vào TỪNG MỤC
+
+[HẾT CẤU TRÚC MẪU]
+`;
+    } catch (e) {
+      console.error('Lỗi parse customTemplate:', e);
+      return null;
+    }
+  }, [userInfo.customTemplate]);
 
   // Handle Input Changes
   const handleUserChange = (field: keyof UserInfo, value: string) => {
@@ -211,7 +295,7 @@ ${userInfo.referenceDocuments}
 [HẾT TÀI LIỆU THAM KHẢO]
 ` : ''}
 
-${userInfo.skknTemplate ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+${userInfo.customTemplate ? getCustomTemplatePrompt() : (userInfo.skknTemplate ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📋 MẪU YÊU CẦU SKKN (BẮT BUỘC TUÂN THỦ):
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 ⚠️ QUAN TRỌNG: Giáo viên đã cung cấp MẪU YÊU CẦU SKKN bên dưới.
@@ -225,7 +309,7 @@ NỘI DUNG MẪU SKKN:
 ${userInfo.skknTemplate}
 
 [HẾT MẪU SKKN]
-` : ''}
+` : '')}
 
 ${userInfo.specialRequirements ? `━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 📝 YÊU CẦU ĐẶC BIỆT TỪ GIÁO VIÊN (BẮT BUỘC THỰC HIỆN):
@@ -364,7 +448,13 @@ CẤU TRÚC SKKN CHUẨN (ÁP DỤNG KHI KHÔNG CÓ MẪU RIÊNG):
 
    GIẢI PHÁP 3: [Tên giải pháp cụ thể, ấn tượng]
         [Cấu trúc tương tự giải pháp 1, triển khai đầy đủ 5 mục]
-   
+   ${userInfo.includeSolution4_5 ? `
+   GIẢI PHÁP 4: [Tên giải pháp mở rộng/nâng cao]
+        [Giải pháp bổ trợ, ứng dụng công nghệ nâng cao]
+
+   GIẢI PHÁP 5: [Tên giải pháp mở rộng/nâng cao]
+        [Giải pháp phát triển, mở rộng đối tượng áp dụng]
+   ` : ''}
    → MỐI LIÊN HỆ GIỮA CÁC GIẢI PHÁP (giải thích tính hệ thống, logic)
 
 5. KẾT QUẢ ĐẠT ĐƯỢC (4-5 trang)
@@ -425,7 +515,7 @@ YÊU CẦU DÀN Ý (NGẮN GỌN - CHỈ ĐẦU MỤC):
 ⚠️ QUAN TRỌNG: Dàn ý phải NGẮN GỌN, chỉ liệt kê CÁC ĐẦU MỤC CHÍNH.
 Nội dung chi tiết sẽ được triển khai ở các bước viết sau.
 
-✓ CHỈ 3 GIẢI PHÁP - liệt kê TÊN giải pháp, không triển khai chi tiết
+✓ ${userInfo.includeSolution4_5 ? '5 GIẢI PHÁP (bao gồm 2 giải pháp mở rộng/nâng cao)' : 'CHỈ 3 GIẢI PHÁP'} - liệt kê TÊN giải pháp, không triển khai chi tiết
 ✓ Mỗi phần chỉ ghi tiêu đề mục và các ý chính (1-2 dòng mỗi ý)
 ✓ KHÔNG viết đoạn văn dài trong dàn ý
 ✓ KHÔNG triển khai chi tiết nội dung - chỉ gợi ý hướng đi
@@ -545,7 +635,9 @@ QUAN TRỌNG:
         - Không viết dính chữ.
         - Menu Navigation: Đánh dấu Bước 2 đã xong (✅), Bước 3 đang làm (🔵).
         
-        Viết sâu sắc, học thuật, đúng cấu trúc đã đề ra. Lưu ý bám sát thông tin về trường và địa phương đã cung cấp.`;
+        Viết sâu sắc, học thuật, đúng cấu trúc đã đề ra. Lưu ý bám sát thông tin về trường và địa phương đã cung cấp.
+        
+        ${getPageLimitPrompt()}`;
 
       nextStepEnum = GenerationStep.PART_I_II;
     } else {
@@ -562,7 +654,16 @@ QUAN TRỌNG:
               ⚠️ LƯU Ý FORMAT: 
               - Viết từng câu xuống dòng riêng.
               - Tách đoạn rõ ràng.
-              - Bảng số liệu phải tuân thủ format Markdown chuẩn: | Tiêu đề | Số liệu |.`,
+              - Bảng số liệu phải tuân thủ format Markdown chuẩn: | Tiêu đề | Số liệu |.
+              
+              🖼️ GỢI Ý HÌNH ẢNH MINH HỌA (BẮT BUỘC):
+              Trong phần Thực trạng, hãy gợi ý 1-2 vị trí nên đặt hình ảnh minh họa với format:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Mô tả chi tiết hình ảnh cần chụp/tạo - Đặt sau phần nào]**
+              Ví dụ:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Biểu đồ cột thể hiện tỉ lệ học sinh yếu/trung bình/khá/giỏi trước khi áp dụng sáng kiến - Đặt sau bảng khảo sát đầu năm]**
+              **[🖼️ GỢI Ý HÌNH ẢNH: Ảnh chụp thực tế lớp học/phòng thí nghiệm tại ${userInfo.school} - Đặt phần đặc điểm nhà trường]**
+              
+              ${getPageLimitPrompt()}`,
           nextStep: GenerationStep.PART_III
         },
         [GenerationStep.PART_III]: {
@@ -593,7 +694,16 @@ QUAN TRỌNG:
               3. Sử dụng Format "KẾT THÚC GIẢI PHÁP" ở cuối.
               
               Lưu ý đặc biệt: Phải có VÍ DỤ MINH HỌA (Giáo án/Hoạt động) cụ thể theo SGK ${userInfo.textbook}.
-              Menu Navigation: Đánh dấu Bước 5 đang làm (🔵).`,
+              Menu Navigation: Đánh dấu Bước 5 đang làm (🔵).
+              
+              🖼️ GỢI Ý HÌNH ẢNH MINH HỌA (BắT BUỘC):
+              Trong GIẢI PHÁP 1, hãy gợi ý 1-2 vị trí nên đặt hình ảnh minh họa với format:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Mô tả chi tiết hình ảnh - Đặt sau phần nào]**
+              Ví dụ gợi ý cho Giải pháp 1:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Sơ đồ quy trình thực hiện giải pháp (5-7 bước) dạng flowchart - Đặt đầu mục Quy trình thực hiện]**
+              **[🖼️ GỢI Ý HÌNH ẢNH: Ảnh chụp học sinh thực hiện hoạt động/Ảnh miền họa hoạt động mẫu - Đặt trong phần Ví dụ minh họa]**
+              
+              ${getPageLimitPrompt()}`,
           nextStep: GenerationStep.PART_IV_SOL1
         },
         [GenerationStep.PART_IV_SOL1]: {
@@ -612,39 +722,88 @@ QUAN TRỌNG:
                  - Xuống dòng sau mỗi câu.
                  - Xuống 2 dòng sau mỗi đoạn.
                  - Có khung "KẾT THÚC GIẢI PHÁP" ở cuối mỗi giải pháp.
-              `,
+              
+              ${getPageLimitPrompt()}`,
           nextStep: GenerationStep.PART_IV_SOL2_3
         },
-        [GenerationStep.PART_IV_SOL2_3]: {
-          // ULTRA MODE - Viết Giải pháp 2 và 3
-          prompt: `
-              BẮT ĐẦU phản hồi bằng MENU NAVIGATION trạng thái Bước 5 (Viết Giải pháp 2-3 - Đang thực hiện).
+        [GenerationStep.PART_IV_SOL2_3]: userInfo.includeSolution4_5
+          ? {
+            // Nếu có chọn 5 giải pháp → prompt viết Giải pháp 4-5
+            prompt: `
+                BẮT ĐẦU phản hồi bằng MENU NAVIGATION trạng thái Bước 6 (Viết Giải pháp 4-5 - Đang thực hiện).
 
-              Tiếp tục giữ vững vai trò CHUYÊN GIA GIÁO DỤC (ULTRA MODE).
-              
-              Nhiệm vụ: Viết GIẢI PHÁP 2 và GIẢI PHÁP 3 cho đề tài: "${userInfo.topic}".
-              
-              ⚠️ LƯU Ý QUAN TRỌNG: Chỉ có 3 GIẢI PHÁP trọng tâm. Đây là 2 giải pháp cuối cùng.
-              Hãy làm HOÀN THIỆN, CHỈN CHU từng giải pháp.
-              
-              Yêu cầu:
-              1. Nội dung độc đáo, không trùng lặp với Giải pháp 1.
-              2. Tận dụng tối đa CSVC: ${userInfo.facilities}.
-              3. Mỗi giải pháp phải có:
-                 - Mục tiêu rõ ràng
-                 - Nội dung và cách thực hiện chi tiết
-                 - Quy trình 5-7 bước cụ thể
-                 - Ví dụ minh họa từ SGK ${userInfo.textbook || "hiện hành"}
-                 - Điều kiện thực hiện & lưu ý
-              4. BẮT BUỘC TUÂN THỦ FORMAT:
-                 - Xuống dòng sau mỗi câu.
-                 - Xuống 2 dòng sau mỗi đoạn.
-                 - Có khung "KẾT THÚC GIẢI PHÁP" ở cuối mỗi giải pháp.
-              5. Kết thúc bằng MỐI LIÊN HỆ GIỮA CÁC GIẢI PHÁP (tính hệ thống, logic).
-              `,
-          nextStep: GenerationStep.PART_V_VI
-        },
-        [GenerationStep.PART_V_VI]: {
+                Tiếp tục giữ vững vai trò CHUYÊN GIA GIÁO DỤC (ULTRA MODE).
+                
+                Nhiệm vụ: Viết tiếp GIẢI PHÁP 4 và GIẢI PHÁP 5 cho đề tài: "${userInfo.topic}".
+                
+                ⚠️ LƯU Ý: Đây là 2 giải pháp MỞ RỘNG và NÂNG CAO cuối cùng.
+                Các giải pháp này có thể là:
+                - Biện pháp bổ trợ, tăng cường
+                - Giải pháp ứng dụng công nghệ/AI nâng cao
+                - Giải pháp phát triển, mở rộng sang các lớp/đối tượng khác
+                
+                Yêu cầu:
+                1. Nội dung độc đáo, KHÔNG trùng lặp với Giải pháp 1, 2, 3.
+                2. Tận dụng tối đa CSVC: ${userInfo.facilities}.
+                3. Mỗi giải pháp phải có:
+                   - Mục tiêu rõ ràng
+                   - Nội dung và cách thực hiện chi tiết
+                   - Quy trình 5-7 bước cụ thể
+                   - Ví dụ minh họa từ SGK ${userInfo.textbook || "hiện hành"}
+                   - Điều kiện thực hiện & lưu ý
+                4. BẮT BUỘC TUÂN THỦ FORMAT:
+                   - Xuống dòng sau mỗi câu.
+                   - Xuống 2 dòng sau mỗi đoạn.
+                   - Có khung "KẾT THÚC GIẢI PHÁP" ở cuối mỗi giải pháp.
+                5. Kết thúc bằng MỐI LIÊN HỆ GIỮA TẤT CẢ 5 GIẢI PHÁP (tính hệ thống, logic, bổ trợ lẫn nhau).
+                
+                🖼️ GỢI Ý HÌNH ẢNH MINH HỌA (BẮT BUỘC):
+                Trong GIẢI PHÁP 4 và 5, hãy gợi ý 1-2 vị trí nên đặt hình ảnh minh họa cho MỖI giải pháp với format:
+                **[🖼️ GỢI Ý HÌNH ẢNH: Mô tả chi tiết hình ảnh - Đặt sau phần nào]**
+                
+                ${getPageLimitPrompt()}`,
+            nextStep: GenerationStep.PART_IV_SOL4_5
+          }
+          : {
+            // Nếu chỉ 3 giải pháp → prompt viết Phần V-VI
+            prompt: `
+                BẮT ĐẦU phản hồi bằng MENU NAVIGATION trạng thái Bước 7 (Kết luận & Khuyến nghị - Đang thực hiện).
+
+                Tiếp tục viết:
+                
+                5. KẾT QUẢ ĐẠT ĐƯỢC (4-5 trang):
+                   - 5.1. Mục đích thực nghiệm
+                   - 5.2. Nội dung thực nghiệm  
+                   - 5.3. Tổ chức thực nghiệm (Bảng so sánh TRƯỚC-SAU với số liệu lẻ)
+                
+                6. ĐIỀU KIỆN ĐỂ SÁNG KIẾN ĐƯỢC NHÂN RỘNG (1-2 trang)
+                
+                KẾT LUẬN VÀ KHUYẾN NGHỊ (2-3 trang):
+                   - Kết luận
+                   - Khuyến nghị
+                
+                TÀI LIỆU THAM KHẢO (8-12 tài liệu)
+                
+                Đảm bảo số liệu phần Kết quả phải LOGIC và chứng minh được sự tiến bộ so với phần Thực trạng.
+                Sử dụng số liệu lẻ (42.3%, 67.8%) không dùng số tròn.
+                
+                ⚠️ LƯU Ý FORMAT: 
+                - Viết từng câu xuống dòng riêng.
+                - Tách đoạn rõ ràng.
+                - Không viết dính chữ.
+                
+                📌 LƯU Ý: Chưa viết phần PHỤ LỤC chi tiết, chỉ gợi ý danh sách phụ lục.
+                Phụ lục chi tiết sẽ được tạo riêng bằng nút "TẠO PHỤ LỤC".
+                
+                🖼️ GỢI Ý HÌNH ẢNH MINH HỌA (BẮT BUỘC):
+                Trong phần KẾT QUẢ, hãy gợi ý 2-3 vị trí nên đặt hình ảnh minh họa với format:
+                **[🖼️ GỢI Ý HÌNH ẢNH: Mô tả chi tiết hình ảnh - Đặt sau phần nào]**
+                
+                ${getPageLimitPrompt()}`,
+            nextStep: GenerationStep.PART_V_VI
+          },
+        // Step: Giải pháp 4 và 5 → tiếp theo là Phần V-VI
+        [GenerationStep.PART_IV_SOL4_5]: {
           prompt: `
               BẮT ĐẦU phản hồi bằng MENU NAVIGATION trạng thái Bước 7 (Kết luận & Khuyến nghị - Đang thực hiện).
 
@@ -673,7 +832,32 @@ QUAN TRỌNG:
               - Menu Navigation: Đánh dấu các bước đã xong (✅), Bước 7 đang làm (🔵).
               
               📌 LƯU Ý: Chưa viết phần PHỤ LỤC chi tiết, chỉ gợi ý danh sách phụ lục.
-              Phụ lục chi tiết sẽ được tạo riêng bằng nút "TẠO PHỤ LỤC".`,
+              Phụ lục chi tiết sẽ được tạo riêng bằng nút "TẠO PHỤ LỤC".
+              
+              🖼️ GỢI Ý HÌNH ẢNH MINH HỌA (BẮT BUỘC):
+              Trong phần KẾT QUẢ, hãy gợi ý 2-3 vị trí nên đặt hình ảnh minh họa với format:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Mô tả chi tiết hình ảnh - Đặt sau phần nào]**
+              Ví dụ:
+              **[🖼️ GỢI Ý HÌNH ẢNH: Biểu đồ so sánh kết quả học tập TRƯỚC và SAU khi áp dụng sáng kiến - Đặt sau bảng số liệu kết quả]**
+              **[🖼️ GỢI Ý HÌNH ẢNH: Ảnh học sinh hứng thú tham gia hoạt động học tập mới - Đặt phần đánh giá định tính]**
+              
+              ${getPageLimitPrompt()}`,
+          nextStep: GenerationStep.PART_V_VI
+        },
+        // Step cuối: PART_V_VI → Chuyển sang COMPLETED (không gửi prompt nữa)
+        [GenerationStep.PART_V_VI]: {
+          prompt: `
+              ✅ SKKN ĐÃ HOÀN THÀNH!
+              
+              Bạn đã viết xong toàn bộ nội dung chính của SKKN.
+              Bao gồm: Đặt vấn đề, Cơ sở lý luận, Thực trạng, Giải pháp, Kết quả và Kết luận.
+              
+              📌 BÂY GIỜ BẠN CÓ THỂ:
+              1. Xuất file Word để chỉnh sửa chi tiết
+              2. Tạo PHỤ LỤC chi tiết bằng nút "TẠO PHỤ LỤC"
+              3. Kiểm tra lại nội dung và định dạng
+              
+              Chúc mừng bạn đã hoàn thành bản thảo SKKN!`,
           nextStep: GenerationStep.COMPLETED
         }
       };
@@ -963,14 +1147,17 @@ QUAN TRỌNG:
             <Wand2 className="h-6 w-6" />
             SKKN PRO
           </h1>
-          <p className="text-xs text-gray-900 font-semibold mt-1 tracking-wide opacity-70">Trợ lý viết SKKN được nâng cấp bởi Trần Thị Kim Thoa</p>
+          <p className="text-xs text-gray-900 font-semibold mt-1 tracking-wide opacity-70">Trợ lý viết SKKN được nâng cấp bởi Trần Hoài Thanh</p>
         </div>
 
         {/* Progress Stepper */}
         <div className="space-y-6">
           {Object.entries(STEPS_INFO).map(([key, info]) => {
             const stepNum = parseInt(key);
-            if (stepNum > 8) return null; // Don't show completed logic step
+            if (stepNum > 9) return null; // Don't show completed logic step
+
+            // Ẩn step "Giải pháp 4-5" nếu người dùng không chọn
+            if (stepNum === 6 && !userInfo.includeSolution4_5) return null;
 
             let statusColor = "text-gray-400 border-gray-200";
             let icon = <div className="w-2 h-2 rounded-full bg-gray-300" />;
@@ -1137,7 +1324,7 @@ QUAN TRỌNG:
               {STEPS_INFO[state.step < 9 ? state.step : 8].label}
             </span>
           </div>
-          <p className="text-xs text-gray-500 font-medium">Trợ lý viết SKKN được nâng cấp bởi Trần Thị Kim Thoa</p>
+          <p className="text-xs text-gray-500 font-medium">Trợ lý viết SKKN được nâng cấp bởi Trần Hoài Thanh</p>
         </div>
 
         {state.error && (() => {
@@ -1203,6 +1390,8 @@ QUAN TRỌNG:
               onSubmit={startGeneration}
               onManualSubmit={handleManualOutlineSubmit}
               isSubmitting={state.isStreaming}
+              apiKey={apiKey}
+              selectedModel={selectedModel}
             />
           </div>
         ) : (
