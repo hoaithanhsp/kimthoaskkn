@@ -1147,7 +1147,7 @@ QUAN TRỌNG:
             <Wand2 className="h-6 w-6" />
             SKKN PRO
           </h1>
-          <p className="text-xs text-gray-900 font-semibold mt-1 tracking-wide opacity-70">Trợ lý viết SKKN được nâng cấp bởi Trần Hoài Thanh</p>
+          <p className="text-xs text-gray-900 font-semibold mt-1 tracking-wide opacity-70">Trợ lý viết SKKN được nâng cấp bởi Trần Thị Kim Thoa</p>
         </div>
 
         {/* Progress Stepper */}
@@ -1324,7 +1324,7 @@ QUAN TRỌNG:
               {STEPS_INFO[state.step < 9 ? state.step : 8].label}
             </span>
           </div>
-          <p className="text-xs text-gray-500 font-medium">Trợ lý viết SKKN được nâng cấp bởi Trần Hoài Thanh</p>
+          <p className="text-xs text-gray-500 font-medium">Trợ lý viết SKKN được nâng cấp bởi Trần Thị Kim Thoa</p>
         </div>
 
         {state.error && (() => {
